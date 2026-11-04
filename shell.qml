@@ -1,4 +1,4 @@
-// Confetti overlay. Run: qs -p shell.qml   Fire: qs -p shell.qml ipc call confetti fire
+// Confetti overlay. Run: qs -p shell.qml   Fire: qs -p shell.qml ipc call confetti shoot confetti
 import QtQuick
 import QtQuick.Particles
 import Quickshell
@@ -9,24 +9,109 @@ import Quickshell.Hyprland
 ShellRoot {
     id: root
 
-    // flakes per side per press
-    readonly property int perSide: 30
     // max random tilt of each cannon per press, degrees
     readonly property real aimJitter: 10
-    readonly property var colors: ["#ff4766", "#ffd12e", "#48c7ff", "#72f26b", "#eb61f2", "#ff8a3d", "#ffffff"]
-    // drag: higher = floatier, slower fall (terminal speed = 750 / drag px/s)
-    readonly property var weights: [
-        { drag: 3.4, size: 11, sizeVar: 4 },
-        { drag: 2.4, size: 16, sizeVar: 5 },
-        { drag: 1.6, size: 23, sizeVar: 7 }
-    ]
 
-    signal fired(real amount)
+    // Presets, fired by name. Per preset:
+    //   perSide  flakes per cannon per press
+    //   images   flake images (any aspect ratio), picked at random
+    //   colors   tints, picked at random; omit to keep the image's own colors (emoji)
+    //   weights  classes picked at random; drag: higher = floatier, slower fall
+    //            (terminal speed = 750 / drag px/s), size/sizeVar in px
+    //   tilt     random start rotation, degrees
+    //   spin     random rotation speed, degrees/s
+    readonly property var presets: ({
+        confetti: {
+            perSide: 30,
+            images: ["flake.png"],
+            colors: ["#ff4766", "#ffd12e", "#48c7ff", "#72f26b", "#eb61f2", "#ff8a3d", "#ffffff"],
+            weights: [
+                { drag: 3.4, size: 11, sizeVar: 4 },
+                { drag: 2.4, size: 16, sizeVar: 5 },
+                { drag: 1.6, size: 23, sizeVar: 7 }
+            ],
+            tilt: 180,
+            spin: 540
+        },
+        pepe: {
+            perSide: 5,
+            images: ["pepe.png"],
+            weights: [
+                { drag: 2.6, size: 44, sizeVar: 8 },
+                { drag: 1.8, size: 58, sizeVar: 6 }
+            ],
+            tilt: 25,
+            spin: 60
+        },
+        bomb: {
+            perSide: 4,
+            images: ["bomb.png"],
+            weights: [
+                { drag: 1.5, size: 52, sizeVar: 12 }
+            ],
+            tilt: 40,
+            spin: 120
+        },
+        bikestick: {
+            perSide: 4,
+            images: ["bikestick.png"],
+            weights: [
+                { drag: 2.2, size: 56, sizeVar: 8 }
+            ],
+            tilt: 20,
+            spin: 45
+        },
+        pog: {
+            perSide: 6,
+            images: ["pog.png"],
+            weights: [
+                { drag: 2.6, size: 42, sizeVar: 8 },
+                { drag: 1.8, size: 50, sizeVar: 6 }
+            ],
+            tilt: 30,
+            spin: 90
+        },
+        "100": {
+            perSide: 6,
+            images: ["100.png"],
+            weights: [
+                { drag: 2.6, size: 44, sizeVar: 8 },
+                { drag: 1.8, size: 56, sizeVar: 8 }
+            ],
+            tilt: 25,
+            spin: 60
+        }
+    })
+    readonly property string defaultPreset: "confetti"
+
+    // every image x color x weight combination becomes one particle group
+    readonly property var kinds: {
+        const out = [];
+        for (const name in presets) {
+            const p = presets[name];
+            for (const image of p.images)
+                for (const color of (p.colors ?? ["white"]))
+                    for (const weight of p.weights)
+                        out.push({ preset: name, image, color, weight, tilt: p.tilt, spin: p.spin });
+        }
+        return out;
+    }
+
+    signal fired(string preset, real amount)
+
+    function fire(preset, amount) {
+        if (!(preset in presets)) {
+            console.warn("confetti: unknown preset", preset, "- have:", Object.keys(presets).join(", "));
+            return;
+        }
+        fired(preset, amount);
+    }
 
     IpcHandler {
         target: "confetti"
-        function fire(): void { root.fired(1) }
-        function burst(amount: real): void { root.fired(amount) }
+        function fire(): void { root.fire(root.defaultPreset, 1) }
+        function shoot(preset: string): void { root.fire(preset, 1) }
+        function burst(preset: string, amount: real): void { root.fire(preset, amount) }
     }
 
     Variants {
@@ -51,30 +136,33 @@ ShellRoot {
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
             // presses queued while the overlay warms up
-            property real pending: 0
+            property var pending: []
 
-            function shoot(amount) {
+            function shoot(preset, amount) {
                 win.leftAim = -60 + (Math.random() - 0.5) * 2 * root.aimJitter;
                 win.rightAim = -120 + (Math.random() - 0.5) * 2 * root.aimJitter;
-                // each flake gets a random color/weight
-                const n = Math.max(1, Math.round(root.perSide * amount));
+                // each flake gets a random image/color/weight of the preset
+                const pool = [];
+                for (let i = 0; i < flakes.count; i++)
+                    if (root.kinds[i].preset === preset) pool.push(flakes.itemAt(i));
+                const n = Math.max(1, Math.round(root.presets[preset].perSide * amount));
                 for (let i = 0; i < n; i++) {
-                    flakes.itemAt(Math.floor(Math.random() * flakes.count)).leftGun.burst(1);
-                    flakes.itemAt(Math.floor(Math.random() * flakes.count)).rightGun.burst(1);
+                    pool[Math.floor(Math.random() * pool.length)].leftGun.burst(1);
+                    pool[Math.floor(Math.random() * pool.length)].rightGun.burst(1);
                 }
             }
 
             Connections {
                 target: root
-                function onFired(amount) {
+                function onFired(preset, amount) {
                     const focused = Hyprland.focusedMonitor;
                     if (focused && focused.name !== win.modelData.name) return;
                     win.lastFire = Date.now();
                     if (win.visible && !warmup.running) {
-                        win.shoot(amount);
+                        win.shoot(preset, amount);
                         return;
                     }
-                    win.pending += amount;
+                    win.pending.push({ preset, amount });
                     if (warmup.running) return;
                     // ImageParticle only applies color/spin once its render node exists,
                     // so prime every group off-screen, then fire a few frames later
@@ -88,8 +176,8 @@ ShellRoot {
                 id: warmup
                 interval: 80
                 onTriggered: {
-                    win.shoot(win.pending);
-                    win.pending = 0;
+                    for (const p of win.pending) win.shoot(p.preset, p.amount);
+                    win.pending = [];
                 }
             }
 
@@ -127,19 +215,27 @@ ShellRoot {
 
             Repeater {
                 id: flakes
-                model: root.colors.length * root.weights.length
+                model: root.kinds
 
                 Item {
                     id: flake
+                    required property var modelData
                     required property int index
-                    readonly property string group: "c" + index
-                    readonly property string tint: root.colors[index % root.colors.length]
-                    readonly property var weight: root.weights[Math.floor(index / root.colors.length)]
+                    readonly property string group: "k" + index
+                    readonly property var weight: modelData.weight
                     // launch speed scales with drag so all weights reach similar heights
                     readonly property real launch: win.modelData.height * weight.drag * 1.0
+                    // particles are square; squash to the image's aspect ratio
+                    readonly property real aspect: probe.implicitHeight > 0 ? probe.implicitWidth / probe.implicitHeight : 1
                     property alias leftGun: leftCannon
                     property alias rightGun: rightCannon
                     anchors.fill: parent
+
+                    Image {
+                        id: probe
+                        visible: false
+                        source: Qt.resolvedUrl(flake.modelData.image)
+                    }
 
                     // air drag: kills launch speed, caps fall speed
                     Friction {
@@ -153,10 +249,12 @@ ShellRoot {
                     ImageParticle {
                         system: sys
                         groups: [flake.group]
-                        source: Qt.resolvedUrl("flake.png")
-                        color: flake.tint
-                        rotationVariation: 180
-                        rotationVelocityVariation: 540
+                        source: Qt.resolvedUrl(flake.modelData.image)
+                        color: flake.modelData.color
+                        rotationVariation: flake.modelData.tilt
+                        rotationVelocityVariation: flake.modelData.spin
+                        xVector: PointDirection { x: Math.min(1, flake.aspect) }
+                        yVector: PointDirection { y: Math.min(1, 1 / flake.aspect) }
                     }
 
                     // bottom-left cannon, aims up-right

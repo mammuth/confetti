@@ -1,13 +1,19 @@
 #!/bin/bash
 # Fire confetti; starts the overlay daemon on first use.
+# usage: confetti [preset] [amount]
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 QS=(qs -p "$DIR/shell.qml")
-fire() { "${QS[@]}" ipc call confetti "${@:-fire}" >/dev/null 2>&1; }
-fire "$@" && exit 0
+case $# in
+  0) ARGS=(fire) ;;
+  1) ARGS=(shoot "$1") ;;
+  *) ARGS=(burst "$1" "$2") ;;
+esac
+fire() { "${QS[@]}" ipc call confetti "${ARGS[@]}" >/dev/null 2>&1; }
+fire && exit 0
 "${QS[@]}" -d >/dev/null 2>&1
 for _ in $(seq 20); do
   sleep 0.1
-  fire "$@" && exit 0
+  fire && exit 0
 done
 echo "confetti: overlay failed to start; run '${QS[*]}' to see errors" >&2
 exit 1
