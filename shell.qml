@@ -80,6 +80,16 @@ ShellRoot {
             ],
             tilt: 25,
             spin: 60
+        },
+        heart: {
+            perSide: 6,
+            images: ["heart.png"],
+            weights: [
+                { drag: 2.8, size: 40, sizeVar: 8 },
+                { drag: 2.0, size: 52, sizeVar: 8 }
+            ],
+            tilt: 25,
+            spin: 45
         }
     })
     readonly property string defaultPreset: "confetti"
